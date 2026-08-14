@@ -206,6 +206,9 @@ NeverLose.MainColor = Color3.fromRGB(8, 8, 13);
 NeverLose.RegisiteryColor = {};
 NeverLose.NameRegisitry = {};
 NeverLose.IsMosueOverOtherFrame = false;
+NeverLose.Global3DRenderMode = false;
+NeverLose.GlobalSurfaceGui = nil;
+NeverLose.__OverlayGuis = {};
 NeverLose.GlobalLogo = "rbxassetid://120358385035996";
 NeverLose.ImageColorMapping = "rbxassetid://4155801252";
 
@@ -275,8 +278,7 @@ end;
 -- Shared input dispatcher: a single global InputChanged handler routes movement to
 -- the currently active draggable (e.g. slider), instead of one connection per widget.
 NeverLose.__ActiveDrag = nil;
-NeverLose.__3DPan = Vector2.new(0, 0);
-NeverLose.__3DDistance = 10;
+NeverLose.__DragRelease = nil;
 NeverLose:AddSignal(UserInputService.InputChanged:Connect(function(Input)
 	if Input.UserInputType == Enum.UserInputType.MouseMovement or Input.UserInputType == Enum.UserInputType.Touch then
 		local drag = NeverLose.__ActiveDrag;
@@ -290,8 +292,39 @@ end));
 NeverLose:AddSignal(UserInputService.InputEnded:Connect(function(Input)
 	if Input.UserInputType == Enum.UserInputType.MouseButton1 or Input.UserInputType == Enum.UserInputType.Touch then
 		NeverLose.__ActiveDrag = nil;
+
+		local release = NeverLose.__DragRelease;
+		NeverLose.__DragRelease = nil;
+
+		if release then
+			release();
+		end;
 	end;
 end));
+
+function NeverLose:RegisterOverlay(gui)
+	table.insert(NeverLose.__OverlayGuis, gui);
+end;
+
+function NeverLose:SyncOverlayParents()
+	local target;
+
+	if NeverLose.Global3DRenderMode then
+		target = NeverLose.GlobalSurfaceGui;
+	else
+		target = NeverLose.ScreenGui;
+	end;
+
+	if not target then
+		return;
+	end;
+
+	for _, gui in next, NeverLose.__OverlayGuis do
+		if gui.Parent and gui.Visible then
+			gui.Parent = target;
+		end;
+	end;
+end;
 
 function NeverLose:AddQuery(ItemRoot: Frame , Name : string)
 	table.insert(NeverLose.NameRegisitry , {
@@ -481,30 +514,47 @@ NeverLose.Drag = (function(InputFrame: Frame, MoveFrame: Frame, Speed : number)
 	local dragToggle: boolean = false;
 	local dragStart: Vector3 = nil;
 	local startPos: UDim2 = nil;
-	local panStart: Vector2 = nil;
+	local planePos: Vector3 = nil;
+	local planeNormal: Vector3 = nil;
+	local grabOffset: Vector3 = nil;
+	local startRot: CFrame = nil;
 	local Tween = TweenInfo.new(Speed);
 
 	local updateInput = function(input)
-		local delta = input.Position - dragStart;
-
 		if NeverLose.Global3DRenderMode then
-			-- Pan the world Part in the camera plane; do not pin WindowFrame to center.
+			-- Move the world Part on the plane captured at drag-start. The panel
+			-- does not follow the camera, and is not pinned to the screen center.
+			local surface = NeverLose.GlobalSurfaceGui;
+			local part = surface and surface.Adornee;
 			local cam = workspace.CurrentCamera;
-			local D = NeverLose.__3DDistance or 10;
-			local vpY = (cam and cam.ViewportSize.Y) or 1080;
-			local vfov = math.rad((cam and cam.FieldOfView) or 70);
-			local studsPerPx = (2 * D * math.tan(vfov * 0.5)) / math.max(vpY, 1);
-			local pan = (panStart or Vector2.new(0, 0)) + Vector2.new(delta.X * studsPerPx, -delta.Y * studsPerPx);
-			local maxPan = D * 0.9;
 
-			NeverLose.__3DPan = Vector2.new(
-				math.clamp(pan.X, -maxPan, maxPan),
-				math.clamp(pan.Y, -maxPan, maxPan)
-			);
+			if not part or not cam or not planePos or not planeNormal or not grabOffset then
+				return;
+			end;
+
+			local loc = UserInputService:GetMouseLocation();
+			local ray = cam:ScreenPointToRay(loc.X, loc.Y);
+			local hit = NeverLose.RayPlaneHit(planePos, planeNormal, ray.Origin, ray.Direction);
+
+			if not hit then
+				return;
+			end;
+
+			local newPos = hit - grabOffset;
+			local halfH = part.Size.Y * 0.5;
+			local minY = NeverLose:Get3DFloorY(newPos) + 1.15 + halfH;
+
+			if newPos.Y < minY then
+				newPos = Vector3.new(newPos.X, minY, newPos.Z);
+			end;
+
+			local rot = startRot or part.CFrame;
+			part.CFrame = CFrame.new(newPos) * (rot - rot.Position);
 
 			return;
 		end;
 
+		local delta = input.Position - dragStart;
 		local position = UDim2.new(startPos.X.Scale, startPos.X.Offset + delta.X,
 			startPos.Y.Scale, startPos.Y.Offset + delta.Y);
 
@@ -518,7 +568,32 @@ NeverLose.Drag = (function(InputFrame: Frame, MoveFrame: Frame, Speed : number)
 			dragToggle = true;
 			dragStart = input.Position;
 			startPos = MoveFrame.Position;
-			panStart = NeverLose.__3DPan or Vector2.new(0, 0);
+			planePos = nil;
+			planeNormal = nil;
+			grabOffset = nil;
+			startRot = nil;
+
+			if NeverLose.Global3DRenderMode then
+				local surface = NeverLose.GlobalSurfaceGui;
+				local part = surface and surface.Adornee;
+				local cam = workspace.CurrentCamera;
+
+				if part and cam then
+					planePos = part.Position;
+					planeNormal = part.CFrame.LookVector;
+					startRot = part.CFrame;
+
+					local loc = UserInputService:GetMouseLocation();
+					local ray = cam:ScreenPointToRay(loc.X, loc.Y);
+					local hit = NeverLose.RayPlaneHit(planePos, planeNormal, ray.Origin, ray.Direction);
+
+					if hit then
+						grabOffset = hit - part.Position;
+					else
+						grabOffset = Vector3.zero;
+					end;
+				end;
+			end;
 
 			local input_end;
 			input_end = input.Changed:Connect(function()
@@ -578,6 +653,22 @@ NeverLose.GetCalculatePosition = (function(planePos, planeNormal, rayOrigin, ray
 	return rayOrigin + (a * rayDirection);
 end);
 
+NeverLose.RayPlaneHit = (function(planePos, planeNormal, rayOrigin, rayDirection)
+	local den = planeNormal:Dot(rayDirection);
+
+	if math.abs(den) < 1e-6 then
+		return nil;
+	end;
+
+	local t = -planeNormal:Dot(rayOrigin - planePos) / den;
+
+	if t < 0 then
+		return nil;
+	end;
+
+	return rayOrigin + (rayDirection * t);
+end);
+
 NeverLose.Get3DFloorY = (function(self, fromPos)
 	local cam = workspace.CurrentCamera;
 	local origin = fromPos or (cam and cam.CFrame.Position) or Vector3.zero;
@@ -612,7 +703,7 @@ NeverLose.GetSurfaceMouse = (function(self, Input)
 	end;
 
 	local part = surface.Adornee;
-	if not part then
+	if not part or not part.Parent then
 		return nil;
 	end;
 
@@ -621,39 +712,42 @@ NeverLose.GetSurfaceMouse = (function(self, Input)
 		return nil;
 	end;
 
-	local mx, my = Mouse.X, Mouse.Y;
-	if Input then
-		mx = Input.Position.X;
-		my = Input.Position.Y;
-	end;
-
-	local ray = cam:ScreenPointToRay(mx, my);
+	-- Always GetMouseLocation + ScreenPointToRay. Input.Position from GuiObject
+	-- events can be canvas-local, while UIS events are screen-space — mixing
+	-- those with AbsolutePosition is what made 3D sliders jump.
+	local loc = UserInputService:GetMouseLocation();
+	local ray = cam:ScreenPointToRay(loc.X, loc.Y);
 	local cf = part.CFrame;
 	local size = part.Size;
+
 	if size.X <= 0 or size.Y <= 0 then
 		return nil;
 	end;
 
-	local planeNormal = cf.LookVector;
-	local den = planeNormal:Dot(ray.Direction);
-	if math.abs(den) < 1e-6 then
+	-- Front face: outward normal is LookVector, face sits at +LookVector * (Z/2).
+	local facePos = cf.Position + (cf.LookVector * (size.Z * 0.5));
+	local hit = NeverLose.RayPlaneHit(facePos, cf.LookVector, ray.Origin, ray.Direction);
+
+	if not hit then
 		return nil;
 	end;
 
-	local a = -planeNormal:Dot(ray.Origin - cf.Position) / den;
-	if a < 0 then
-		return nil;
-	end;
-
-	local hit = ray.Origin + ray.Direction * a;
 	local localHit = cf:PointToObjectSpace(hit);
-	local canvas = surface.AbsoluteSize;
+	local canvas = surface.CanvasSize;
 
 	if canvas.X <= 1 or canvas.Y <= 1 then
-		local pps = surface.PixelsPerStud or 40;
+		canvas = surface.AbsoluteSize;
+	end;
+
+	if canvas.X <= 1 or canvas.Y <= 1 then
+		local pps = surface.PixelsPerStud or 50;
+		if pps <= 0 then
+			pps = 50;
+		end;
 		canvas = Vector2.new(size.X * pps, size.Y * pps);
 	end;
 
+	-- Viewing Front from the camera: +X is right (U), +Y is up (V=0 at top).
 	local u = (localHit.X / size.X) + 0.5;
 	local v = 0.5 - (localHit.Y / size.Y);
 
@@ -662,7 +756,7 @@ end);
 
 NeverLose.GetGuiMouse = (function(self, Input)
 	if NeverLose.Global3DRenderMode then
-		return NeverLose:GetSurfaceMouse(Input);
+		return NeverLose:GetSurfaceMouse();
 	end;
 
 	if Input then
@@ -672,15 +766,28 @@ NeverLose.GetGuiMouse = (function(self, Input)
 	return Vector2.new(Mouse.X, Mouse.Y);
 end);
 
-NeverLose.GetFrameAlphaX = (function(self, Frame, Input)
-	local mouse = NeverLose:GetGuiMouse(Input);
-	if not mouse then
-		return nil;
-	end;
-
+NeverLose.GetFrameAlphaX = (function(self, Frame, Input, localX)
 	local absSize = Frame.AbsoluteSize.X;
 	if absSize <= 0 then
 		return 0;
+	end;
+
+	if typeof(localX) == "number" then
+		return math.clamp(localX / absSize, 0, 1);
+	end;
+
+	if NeverLose.Global3DRenderMode then
+		local mouse = NeverLose:GetSurfaceMouse();
+		if not mouse then
+			return nil;
+		end;
+
+		return math.clamp((mouse.X - Frame.AbsolutePosition.X) / absSize, 0, 1);
+	end;
+
+	local mouse = NeverLose:GetGuiMouse(Input);
+	if not mouse then
+		return nil;
 	end;
 
 	return math.clamp((mouse.X - Frame.AbsolutePosition.X) / absSize, 0, 1);
@@ -928,6 +1035,7 @@ function NeverLose:CreateOptionWindow(Frame: Frame , Zindex)
 
 	OptionHandler.Name = NeverLose.RandomString();
 	OptionHandler.Parent = NeverLose.ScreenGui
+	NeverLose:RegisterOverlay(OptionHandler);
 	OptionHandler.AnchorPoint = Vector2.new(0, 0)
 	OptionHandler.BackgroundColor3 = Color3.fromRGB(20, 22, 27)
 	OptionHandler.BackgroundTransparency = 0.035
@@ -1063,6 +1171,7 @@ function NeverLose:CreateColorPicker(HandleFrame: Frame)
 
 	ColorPickerHandler.Name = NeverLose.RandomString();
 	ColorPickerHandler.Parent = NeverLose.ScreenGui
+	NeverLose:RegisterOverlay(ColorPickerHandler);
 	ColorPickerHandler.AnchorPoint = Vector2.new(0, 0)
 	ColorPickerHandler.BackgroundColor3 = Color3.fromRGB(20, 22, 27)
 	ColorPickerHandler.BackgroundTransparency = 0.035
@@ -1105,6 +1214,7 @@ function NeverLose:CreateColorPicker(HandleFrame: Frame)
 	SaViMap.Size = UDim2.new(0, 185, 0, 185)
 	SaViMap.ZIndex = ZIndex + 126
 	SaViMap.Image = NeverLose.ImageColorMapping -- UNSAFE IMAGE
+	SaViMap.Active = true;
 
 	UICorner_2.CornerRadius = UDim.new(0, 5)
 	UICorner_2.Parent = SaViMap
@@ -1135,6 +1245,7 @@ function NeverLose:CreateColorPicker(HandleFrame: Frame)
 	ColorMap.Position = UDim2.new(0.5, 0, 0, 200)
 	ColorMap.Size = UDim2.new(1, -15, 0, 10)
 	ColorMap.ZIndex = ZIndex + 126
+	ColorMap.Active = true;
 
 	UIGradient.Color = ColorSequence.new{ColorSequenceKeypoint.new(0.00, Color3.fromRGB(255, 0, 0)), ColorSequenceKeypoint.new(0.10, Color3.fromRGB(255, 153, 0)), ColorSequenceKeypoint.new(0.20, Color3.fromRGB(203, 255, 0)), ColorSequenceKeypoint.new(0.30, Color3.fromRGB(50, 255, 0)), ColorSequenceKeypoint.new(0.40, Color3.fromRGB(0, 255, 102)), ColorSequenceKeypoint.new(0.50, Color3.fromRGB(0, 255, 255)), ColorSequenceKeypoint.new(0.60, Color3.fromRGB(0, 101, 255)), ColorSequenceKeypoint.new(0.70, Color3.fromRGB(50, 0, 255)), ColorSequenceKeypoint.new(0.80, Color3.fromRGB(204, 0, 255)), ColorSequenceKeypoint.new(0.90, Color3.fromRGB(255, 0, 153)), ColorSequenceKeypoint.new(1.00, Color3.fromRGB(255, 0, 0))}
 	UIGradient.Parent = ColorMap
@@ -1291,58 +1402,151 @@ function NeverLose:CreateColorPicker(HandleFrame: Frame)
 	end;
 
 	ColorPickerLib.IsHold = false;
+	ColorPickerLib.DragKind = nil;
 
-	NeverLose:AddSignal(ColorPickerHandler.InputBegan:Connect(function(Input)
-		if Input.UserInputType == Enum.UserInputType.MouseButton1 or Input.UserInputType == Enum.UserInputType.Touch then
-			ColorPickerLib.IsHold = true;
+	local ApplyHue = function(localX)
+		local w = math.max(ColorMap.AbsoluteSize.X, 1);
+		ColorPickerLib.H = math.clamp(localX / w, 0, 1);
+		ColorPickerLib:Update();
+	end;
+
+	local ApplySV = function(localX, localY)
+		local sx = math.max(SaViMap.AbsoluteSize.X, 1);
+		local sy = math.max(SaViMap.AbsoluteSize.Y, 1);
+		ColorPickerLib.S = math.clamp(localX / sx, 0, 1);
+		ColorPickerLib.V = 1 - math.clamp(localY / sy, 0, 1);
+		ColorPickerLib:Update();
+	end;
+
+	local ApplyHueCanvas = function()
+		local mouse = NeverLose:GetGuiMouse();
+		if not mouse then
+			return;
 		end;
-	end));
+
+		local x0 = ColorMap.AbsolutePosition.X;
+		local x1 = x0 + ColorMap.AbsoluteSize.X;
+		local t = math.clamp(mouse.X, x0, x1);
+		ColorPickerLib.H = (t - x0) / math.max(x1 - x0, 1);
+		ColorPickerLib:Update();
+	end;
+
+	local ApplySVCanvas = function()
+		local mouse = NeverLose:GetGuiMouse();
+		if not mouse then
+			return;
+		end;
+
+		local pos = SaViMap.AbsolutePosition;
+		local size = SaViMap.AbsoluteSize;
+		local px = math.clamp(mouse.X, pos.X, pos.X + size.X);
+		local py = math.clamp(mouse.Y, pos.Y, pos.Y + size.Y);
+		ColorPickerLib.S = (px - pos.X) / math.max(size.X, 1);
+		ColorPickerLib.V = 1 - ((py - pos.Y) / math.max(size.Y, 1));
+		ColorPickerLib:Update();
+	end;
+
+	local ColorDragMove = function()
+		if not ColorPickerLib.IsHold then
+			return;
+		end;
+
+		if ColorPickerLib.DragKind == "h" then
+			if (os.clock() - (ColorPickerLib._localMoveAt or 0)) < 0.05 then
+				return;
+			end;
+			ApplyHueCanvas();
+		elseif ColorPickerLib.DragKind == "sv" then
+			if (os.clock() - (ColorPickerLib._localMoveAt or 0)) < 0.05 then
+				return;
+			end;
+			ApplySVCanvas();
+		end;
+	end;
+
+	local ReleaseColorDrag = function()
+		ColorPickerLib.IsHold = false;
+		ColorPickerLib.DragKind = nil;
+
+		if NeverLose.__ActiveDrag == ColorDragMove then
+			NeverLose.__ActiveDrag = nil;
+		end;
+
+		if NeverLose.__DragRelease == ReleaseColorDrag then
+			NeverLose.__DragRelease = nil;
+		end;
+	end;
 
 	NeverLose:AddSignal(ColorPickerHandler.InputEnded:Connect(function(Input)
 		if Input.UserInputType == Enum.UserInputType.MouseButton1 or Input.UserInputType == Enum.UserInputType.Touch then
-			ColorPickerLib.IsHold = false;
+			ReleaseColorDrag();
 		end;
 	end));
 
 	NeverLose:AddSignal(ColorMap.InputBegan:Connect((function(Input)
 		if Input.UserInputType == Enum.UserInputType.MouseButton1 or Input.UserInputType == Enum.UserInputType.Touch then
 			ColorPickerLib.IsHold = true;
+			ColorPickerLib.DragKind = "h";
+			NeverLose.__ActiveDrag = ColorDragMove;
+			NeverLose.__DragRelease = ReleaseColorDrag;
 
-			while (UserInputService:IsMouseButtonPressed(Enum.UserInputType.MouseButton1) or ColorPickerLib.IsHold) do task.wait()
-				local mouse = NeverLose:GetGuiMouse();
-				if mouse then
-					local ColorY = ColorMap.AbsolutePosition.X
-					local ColorYM = ColorY + ColorMap.AbsoluteSize.X;
-					local Value = math.clamp(mouse.X, ColorY, ColorYM)
-					local Code = ((Value - ColorY) / (ColorYM - ColorY));
+			local abs = ColorMap.AbsolutePosition;
+			local size = ColorMap.AbsoluteSize;
+			local px = Input.Position.X;
 
-					ColorPickerLib.H = Code;
-					ColorPickerLib:Update();
-				end;
+			if px >= abs.X - 4 and px <= abs.X + size.X + 4 then
+				ApplyHue(px - abs.X);
+			else
+				ApplyHueCanvas();
 			end;
 		end;
 	end)));
 
+	NeverLose:AddSignal(ColorMap.MouseMoved:Connect(function(x, y)
+		if ColorPickerLib.IsHold and ColorPickerLib.DragKind == "h" then
+			ColorPickerLib._localMoveAt = os.clock();
+			ApplyHue(x);
+		end;
+	end));
+
+	NeverLose:AddSignal(ColorMap.InputEnded:Connect(function(Input)
+		if Input.UserInputType == Enum.UserInputType.MouseButton1 or Input.UserInputType == Enum.UserInputType.Touch then
+			ReleaseColorDrag();
+		end;
+	end));
+
 	NeverLose:AddSignal(SaViMap.InputBegan:Connect((function(Input)
 		if Input.UserInputType == Enum.UserInputType.MouseButton1 or Input.UserInputType == Enum.UserInputType.Touch then
 			ColorPickerLib.IsHold = true;
+			ColorPickerLib.DragKind = "sv";
+			NeverLose.__ActiveDrag = ColorDragMove;
+			NeverLose.__DragRelease = ReleaseColorDrag;
 
-			while (UserInputService:IsMouseButtonPressed(Enum.UserInputType.MouseButton1) or ColorPickerLib.IsHold) do task.wait();
-				local mouse = NeverLose:GetGuiMouse();
-				if mouse then
-					local PosX = SaViMap.AbsolutePosition.X;
-					local ScaleX = PosX + SaViMap.AbsoluteSize.X;
-					local Value, PosY = math.clamp(mouse.X, PosX, ScaleX), SaViMap.AbsolutePosition.Y;
-					local ScaleY = PosY + SaViMap.AbsoluteSize.Y;
-					local Vals = math.clamp(mouse.Y, PosY, ScaleY);
+			local abs = SaViMap.AbsolutePosition;
+			local size = SaViMap.AbsoluteSize;
+			local px = Input.Position.X;
+			local py = Input.Position.Y;
 
-					ColorPickerLib.S = (Value - PosX) / (ScaleX - PosX);
-					ColorPickerLib.V = (1 - ((Vals - PosY) / (ScaleY - PosY)));
-					ColorPickerLib:Update();
-				end;
-			end
+			if px >= abs.X - 4 and px <= abs.X + size.X + 4 and py >= abs.Y - 4 and py <= abs.Y + size.Y + 4 then
+				ApplySV(px - abs.X, py - abs.Y);
+			else
+				ApplySVCanvas();
+			end;
 		end
 	end)));
+
+	NeverLose:AddSignal(SaViMap.MouseMoved:Connect(function(x, y)
+		if ColorPickerLib.IsHold and ColorPickerLib.DragKind == "sv" then
+			ColorPickerLib._localMoveAt = os.clock();
+			ApplySV(x, y);
+		end;
+	end));
+
+	NeverLose:AddSignal(SaViMap.InputEnded:Connect(function(Input)
+		if Input.UserInputType == Enum.UserInputType.MouseButton1 or Input.UserInputType == Enum.UserInputType.Touch then
+			ReleaseColorDrag();
+		end;
+	end));
 
 	return ColorPickerLib;
 end;
@@ -1775,8 +1979,8 @@ function NeverLose:RegisiterHandler(Handler: Frame , Signal)
 		SliderLib.SetRender(Signal:GetValue());
 		SliderLib.Signal = Signal:Connect(SliderLib.SetRender);
 
-		local Update = function(Input)
-			local SizeScale = NeverLose:GetFrameAlphaX(SlideMain, Input);
+		local Update = function(Input, localX)
+			local SizeScale = NeverLose:GetFrameAlphaX(SlideMain, Input, localX);
 			if not SizeScale then
 				return;
 			end;
@@ -1797,35 +2001,98 @@ function NeverLose:RegisiterHandler(Handler: Frame , Signal)
 		end;
 
 		local IsHold = false;
+		local localMoveAt = 0;
 
 		local DragMove;
+		local ReleaseDrag;
+
 		DragMove = function(Input)
 			if not IsHold then
 				return;
 			end;
 
-			-- Do not cancel on "mouse left frame": in 3D, GuiState/AbsolutePosition
-			-- hit-tests are unreliable and would abort a valid drag. InputEnded
-			-- (widget + global dispatcher) is the source of truth.
+			if NeverLose.Global3DRenderMode then
+				if (os.clock() - localMoveAt) < 0.05 then
+					return;
+				end;
+
+				Update(nil);
+				return;
+			end;
+
 			Update(Input);
 		end;
 
+		ReleaseDrag = function()
+			IsHold = false;
+
+			if NeverLose.__ActiveDrag == DragMove then
+				NeverLose.__ActiveDrag = nil;
+			end;
+
+			if NeverLose.__DragRelease == ReleaseDrag then
+				NeverLose.__DragRelease = nil;
+			end;
+		end;
+
 		do
+			SlideMain.Active = true;
+
 			NeverLose:AddSignal(SlideMain.InputBegan:Connect((function(Input)
 				if Input.UserInputType == Enum.UserInputType.MouseButton1 or Input.UserInputType == Enum.UserInputType.Touch then
 					IsHold = true;
 					NeverLose.__ActiveDrag = DragMove;
-					Update(Input);
+					NeverLose.__DragRelease = ReleaseDrag;
+
+					if NeverLose.Global3DRenderMode then
+						local abs = SlideMain.AbsolutePosition;
+						local size = SlideMain.AbsoluteSize;
+						local px = Input.Position.X;
+
+						if px >= abs.X - 4 and px <= abs.X + size.X + 4 then
+							Update(nil, px - abs.X);
+						else
+							Update(nil);
+						end;
+					else
+						Update(Input);
+					end;
 				end
+			end)))
+
+			NeverLose:AddSignal(SlideMain.MouseMoved:Connect((function(x, y)
+				if IsHold then
+					localMoveAt = os.clock();
+					Update(nil, x);
+				end;
+			end)))
+
+			NeverLose:AddSignal(SlideMain.InputChanged:Connect((function(Input)
+				if not IsHold then
+					return;
+				end;
+
+				if Input.UserInputType ~= Enum.UserInputType.MouseMovement and Input.UserInputType ~= Enum.UserInputType.Touch then
+					return;
+				end;
+
+				if NeverLose.Global3DRenderMode then
+					local abs = SlideMain.AbsolutePosition;
+					local size = SlideMain.AbsoluteSize;
+					local px = Input.Position.X;
+
+					if px >= abs.X - 4 and px <= abs.X + size.X + 4 then
+						localMoveAt = os.clock();
+						Update(nil, px - abs.X);
+					end;
+				else
+					Update(Input);
+				end;
 			end)))
 
 			NeverLose:AddSignal(SlideMain.InputEnded:Connect((function(Input)
 				if Input.UserInputType == Enum.UserInputType.MouseButton1 or Input.UserInputType == Enum.UserInputType.Touch then
-					IsHold = false;
-
-					if NeverLose.__ActiveDrag == DragMove then
-						NeverLose.__ActiveDrag = nil;
-					end;
+					ReleaseDrag();
 				end
 			end)))
 		end;
@@ -2510,6 +2777,7 @@ function NeverLose:RegisiterHandler(Handler: Frame , Signal)
 
 			DropdownHandler.Name = NeverLose.RandomString();
 			DropdownHandler.Parent = NeverLose.ScreenGui;
+			NeverLose:RegisterOverlay(DropdownHandler);
 			DropdownHandler.AnchorPoint = Vector2.new(0.5, 0)
 			DropdownHandler.BackgroundColor3 = Color3.fromRGB(20, 22, 27)
 			DropdownHandler.BackgroundTransparency = 0.5
@@ -2964,6 +3232,7 @@ function NeverLose:CreateToolTips(Container: Frame , Name: string , Content: str
 	local Shadow = NeverLose:CreateShadow(Tooltips);
 
 	Tooltips.Name = NeverLose.RandomString();
+	NeverLose:RegisterOverlay(Tooltips);
 	Tooltips.BackgroundColor3 = Color3.fromRGB(20, 22, 27)
 	Tooltips.BackgroundTransparency = 0.075
 	Tooltips.BorderColor3 = Color3.fromRGB(0, 0, 0)
@@ -3574,7 +3843,8 @@ function NeverLose:CreateWindow(Config)
 		Tabs = {},
 		CurrentTab = 1,
 		Keybind = Config.Keybind,
-		Enable3DRenderer = Config.Enable3DRenderer
+		Enable3DRenderer = Config.Enable3DRenderer,
+		__3DRender = false,
 	};
 
 	NeverLose.GlobalLogo = Window.Logo;
@@ -3642,11 +3912,9 @@ function NeverLose:CreateWindow(Config)
 				WindowFrame.Parent = nil
 			else
 				WindowFrame.Visible = true;
-
-				NeverLose.PlayAnimate(WindowFrame,VSlowTween , {
-					Position = UDim2.fromScale(0.5,0.5);
-				});
-
+				WindowFrame.AnchorPoint = Vector2.new(0.5, 0.5);
+				WindowFrame.Position = UDim2.fromScale(0.5, 0.5);
+				WindowFrame.Size = Window.Size;
 				WindowFrame.Parent = Window.SurfaceGui;
 			end;
 		else
@@ -3656,8 +3924,6 @@ function NeverLose:CreateWindow(Config)
 			else
 				WindowFrame.Visible = true;
 				WindowFrame.Parent = NeverLose.ScreenGui
-
-
 			end;
 		end;
 	end);
@@ -4331,90 +4597,94 @@ function NeverLose:CreateWindow(Config)
 
 	if Window.Enable3DRenderer then
 		local Part = Instance.new('Part');
-		local followConn;
 
 		Part.Name = NeverLose.RandomString();
 		Part.Anchored = true;
-		Part.Transparency = 1;
+		-- Slightly visible to rays: Transparency=1 + AlwaysOnTop=false can drop SurfaceGui input.
+		Part.Transparency = 0.99;
 		Part.CanCollide = false;
 		Part.CanTouch = false;
 		Part.CanQuery = true;
 		Part.CastShadow = false;
 		Part.AudioCanCollide = false;
+		Part.Material = Enum.Material.SmoothPlastic;
+		Part.Color = Color3.new(0, 0, 0);
 		Part.CollisionGroup = NeverLose.RandomString();
-		Part.CFrame = CFrame.new(0,0,0);
+		Part.CFrame = CFrame.new(0, 0, 0);
 		Part.Size = Vector3.zero;
 
-		local SurfaceGui = Instance.new("SurfaceGui")
+		local SurfaceGui = Instance.new("SurfaceGui");
 
-		-- A SurfaceGui must be a sibling LayerCollector of the ScreenGui (same hidden
-		-- container), never nested inside a ScreenGui, or it fails to render/receive input.
+		ProtectGui(SurfaceGui);
+		-- Sibling LayerCollector of the ScreenGui (same hidden container), never nested inside it.
 		SurfaceGui.Parent = CoreGui;
 		SurfaceGui.Adornee = Part;
-		-- AlwaysOnTop SurfaceGuis do not process GUI input in Roblox; keep it false so the
-		-- menu buttons stay clickable on the surface.
 		SurfaceGui.AlwaysOnTop = false;
 		SurfaceGui.Face = Enum.NormalId.Front;
-		SurfaceGui.LightInfluence = 1.000;
+		SurfaceGui.LightInfluence = 0;
+		SurfaceGui.Brightness = 1;
+		SurfaceGui.Active = true;
 		SurfaceGui.ZIndexBehavior = Enum.ZIndexBehavior.Global;
 		SurfaceGui.SizingMode = Enum.SurfaceGuiSizingMode.FixedSize;
-		SurfaceGui.PixelsPerStud = 60;
+		SurfaceGui.PixelsPerStud = 50;
+		SurfaceGui.CanvasSize = Vector2.new(
+			math.max(Window.Size.X.Offset, 120),
+			math.max(Window.Size.Y.Offset, 80)
+		);
 
 		Window.SurfaceGui = SurfaceGui;
+		Window.__3DPlaced = false;
 		NeverLose.GlobalSurfaceGui = SurfaceGui;
 
-		Window.Load3DBlock = (function()
+		local applyCanvas = function()
+			local winW = math.max(Window.Size.X.Offset, 120);
+			local winH = math.max(Window.Size.Y.Offset, 80);
+			local pps = 50;
+
+			SurfaceGui.PixelsPerStud = pps;
+			SurfaceGui.CanvasSize = Vector2.new(winW, winH);
+			Part.Size = Vector3.new(winW / pps, winH / pps, 0.08);
+
+			return winW, winH, pps, winW / pps, winH / pps;
+		end;
+
+		Window.Load3DBlock = (function(replace)
 			local cam = workspace.CurrentCamera;
 			if not cam then
 				return;
 			end;
 
-			if not Window.Signal:GetValue() then
+			local _, _, _, partW, partH = applyCanvas();
+
+			if not Window.Signal:GetValue() or not Window.__3DRender then
 				Part.Parent = nil;
 				return;
 			end;
 
-			local winW = math.max(Window.Size.X.Offset, 120);
-			local winH = math.max(Window.Size.Y.Offset, 80);
-			local pad = 24;
-			local pps = SurfaceGui.PixelsPerStud;
-			if not pps or pps <= 0 then
-				pps = 40;
-				SurfaceGui.PixelsPerStud = pps;
+			Part.Parent = NeverLose.BlurModuleParent or workspace;
+
+			if not replace and Window.__3DPlaced then
+				local pos = Part.Position;
+				local minY = NeverLose:Get3DFloorY(pos) + 1.15 + (partH * 0.5);
+
+				if pos.Y < minY then
+					Part.CFrame = Part.CFrame + Vector3.new(0, minY - pos.Y, 0);
+				end;
+
+				return;
 			end;
 
-			local partW = (winW + pad) / pps;
-			local partH = (winH + pad) / pps;
-			Part.Size = Vector3.new(partW, partH, 0.12);
-
-			local vp = cam.ViewportSize;
 			local vfov = math.rad(cam.FieldOfView);
-			local targetFraction = math.clamp(winH / math.max(vp.Y, 1), 0.28, 0.52);
-			local D = partH / (2 * math.tan(vfov * 0.5) * targetFraction);
-			D = math.clamp(D, 6, 14);
-			NeverLose.__3DDistance = D;
-
-			local pan = NeverLose.__3DPan or Vector2.new(0, 0);
-			local flatLook = Vector3.new(cam.CFrame.LookVector.X, 0, cam.CFrame.LookVector.Z);
-			if flatLook.Magnitude < 0.05 then
-				flatLook = Vector3.new(0, 0, -1);
-			else
-				flatLook = flatLook.Unit;
-			end;
-
-			local right = Vector3.new(cam.CFrame.RightVector.X, 0, cam.CFrame.RightVector.Z);
-			if right.Magnitude < 0.05 then
-				right = Vector3.new(flatLook.Z, 0, -flatLook.X);
-			else
-				right = right.Unit;
-			end;
-
-			-- Horizontal placement at eye height: pitch no longer drives the panel into the floor.
-			local pos = cam.CFrame.Position + (flatLook * D) + (right * pan.X) + (Vector3.yAxis * pan.Y);
+			local aspect = cam.ViewportSize.X / math.max(cam.ViewportSize.Y, 1);
+			local hfov = 2 * math.atan(math.tan(vfov * 0.5) * aspect);
+			local distH = (partH * 0.5) / math.tan(vfov * 0.5) / 0.42;
+			local distW = (partW * 0.5) / math.tan(hfov * 0.5) / 0.42;
+			local D = math.clamp(math.max(distH, distW), 4, 18);
+			local pos = cam.CFrame.Position + (cam.CFrame.LookVector * D);
 			local halfH = partH * 0.5;
-			local floorY = NeverLose:Get3DFloorY(cam.CFrame.Position);
-			local minBottom = floorY + 1.15;
+			local minBottom = NeverLose:Get3DFloorY(cam.CFrame.Position) + 1.15;
 			local hrp = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart");
+
 			if hrp then
 				minBottom = math.max(minBottom, hrp.Position.Y + 0.75);
 			end;
@@ -4424,62 +4694,62 @@ function NeverLose:CreateWindow(Config)
 				pos = Vector3.new(pos.X, minY, pos.Z);
 			end;
 
-			local lookAt = cam.CFrame.Position;
-			local flatTarget = Vector3.new(lookAt.X, pos.Y, lookAt.Z);
-			if (pos - flatTarget).Magnitude < 0.05 then
-				local flatLook = Vector3.new(cam.CFrame.LookVector.X, 0, cam.CFrame.LookVector.Z);
-				if flatLook.Magnitude < 0.05 then
-					flatTarget = pos + Vector3.new(0, 0, -1);
-				else
-					flatTarget = pos + flatLook.Unit;
-				end;
+			local toCam = Vector3.new(cam.CFrame.Position.X - pos.X, 0, cam.CFrame.Position.Z - pos.Z);
+
+			if toCam.Magnitude < 0.05 then
+				toCam = Vector3.new(-cam.CFrame.LookVector.X, 0, -cam.CFrame.LookVector.Z);
 			end;
 
-			Part.Parent = workspace;
-			Part.CFrame = CFrame.lookAt(pos, flatTarget);
+			if toCam.Magnitude < 0.05 then
+				toCam = Vector3.new(0, 0, 1);
+			end;
+
+			Part.CFrame = CFrame.lookAt(pos, pos + toCam.Unit);
+			Window.__3DPlaced = true;
 		end);
 
 		function Window:Set3DRender(val)
 			val = val and true or false;
 
-			-- Idempotent: a redundant toggle must not disturb the current state.
-			if Window.__3DRender == val then
-				return;
-			end;
-
-			Window.__3DRender = val;
-			NeverLose.Global3DRenderMode = val;
-
 			if val then
+				if Window.__3DRender then
+					return;
+				end;
+
 				Window.__2DPos = WindowFrame.Position;
-				NeverLose.__3DPan = Vector2.new(0, 0);
-				Part.Parent = workspace;
-				Window.Load3DBlock();
-
-				if not followConn then
-					followConn = RunService.RenderStepped:Connect(function()
-						if Window.__3DRender then
-							Window.Load3DBlock();
-						end;
-					end);
-					NeverLose:AddSignal(followConn);
-				end;
-
+				Window.__2DSize = WindowFrame.Size;
+				Window.__2DParent = NeverLose.ScreenGui;
+				Window.__3DRender = true;
+				NeverLose.Global3DRenderMode = true;
+				Window.__3DPlaced = false;
+				Window.Load3DBlock(true);
 				renderParentWindow();
+				NeverLose:SyncOverlayParents();
 			else
-				if followConn then
-					followConn:Disconnect();
-					followConn = nil;
+				-- Always restore 2D, even if the flag was already false (toggle desync).
+				Window.__3DRender = false;
+				NeverLose.Global3DRenderMode = false;
+				Window.__3DPlaced = false;
+				Part.Parent = nil;
+
+				WindowFrame.AnchorPoint = Vector2.new(0.5, 0.5);
+
+				if Window.__2DPos then
+					WindowFrame.Position = Window.__2DPos;
 				end;
 
-				-- renderParentWindow reparents WindowFrame back to the ScreenGui;
-				-- then fully restore the 2D layout so switching back is reversible.
-				renderParentWindow();
+				if Window.__2DSize then
+					WindowFrame.Size = Window.__2DSize;
+				end;
 
-				WindowFrame.Position = Window.__2DPos or UDim2.fromScale(0.5, 0.5);
-				WindowFrame.Size = Window.Size;
+				if Window.Signal:GetValue() then
+					WindowFrame.Visible = true;
+					WindowFrame.Parent = Window.__2DParent or NeverLose.ScreenGui;
+				else
+					WindowFrame.Parent = nil;
+				end;
 
-				Part.Parent = nil;
+				NeverLose:SyncOverlayParents();
 			end;
 		end;
 	end;
@@ -4494,6 +4764,8 @@ function NeverLose:CreateWindow(Config)
 
 			Window.__3DRender = false;
 			NeverLose.Global3DRenderMode = false;
+			WindowFrame.Parent = NeverLose.ScreenGui;
+			WindowFrame.Visible = true;
 
 			if val then
 				Logging.new("cube" , "3D renderer is disabled for this window" , 4);
@@ -5018,6 +5290,7 @@ function NeverLose:CreateWindow(Config)
 
 		ConfigMenu.Name = NeverLose.RandomString();
 		ConfigMenu.Parent = NeverLose.ScreenGui;
+		NeverLose:RegisterOverlay(ConfigMenu);
 		ConfigMenu.AnchorPoint = Vector2.new(0.5, 0)
 		ConfigMenu.BackgroundColor3 = Color3.fromRGB(20, 22, 27)
 		ConfigMenu.BackgroundTransparency = 0.035
@@ -5842,6 +6115,10 @@ function NeverLose:CreateWindow(Config)
 				Size = Window.Size
 			})
 		end
+
+		if Window.__3DRender and Window.Load3DBlock then
+			Window.Load3DBlock();
+		end;
 	end;
 
 	Window:SetAccount();
@@ -5857,7 +6134,7 @@ function NeverLose:CreateWindow(Config)
 	function Window:ToggleInterface()
 		Window.Signal:SetValue(not Window.Signal:GetValue());
 
-		if Window.__3DRender then
+		if Window.__3DRender and Window.Load3DBlock then
 			Window.Load3DBlock();
 		end;
 	end;
@@ -6642,6 +6919,25 @@ function NeverLose:Unload()
 	pcall(function()
 		NeverLose.ScreenGui:Destroy();
 	end);
+
+	pcall(function()
+		local surface = NeverLose.GlobalSurfaceGui;
+
+		if surface then
+			local adornee = surface.Adornee;
+			surface:Destroy();
+
+			if adornee then
+				adornee:Destroy();
+			end;
+		end;
+	end);
+
+	NeverLose.Global3DRenderMode = false;
+	NeverLose.GlobalSurfaceGui = nil;
+	NeverLose.__ActiveDrag = nil;
+	NeverLose.__DragRelease = nil;
+	table.clear(NeverLose.__OverlayGuis);
 
 	table.clear(NeverLose.GlobalThreads);
 	table.clear(NeverLose.GlobalSignals);
