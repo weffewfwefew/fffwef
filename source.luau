@@ -2412,7 +2412,7 @@ function NeverLose:RegisiterHandler(Handler: Frame , Signal)
 						Window.Signal:SetValue(false);
 					end
 				end
-			end)
+			end))
 		end);
 
 		NeverLose:AddSignal(bthg.MouseEnter:Connect(function()
@@ -2519,7 +2519,7 @@ function NeverLose:RegisiterHandler(Handler: Frame , Signal)
 						BackendM.SetRender(false);
 					end;
 				end;
-			end)
+			end))
 		end);
 
 		ColorPickerLib.SetRender = function(value)
@@ -3125,7 +3125,7 @@ function NeverLose:RegisiterHandler(Handler: Frame , Signal)
 						DropdownLib.SetFrameRender(false);
 					end;
 				end
-			end)
+			end))
 		end)
 
 		DropdownLib.IsMatch = function(v1)
@@ -6078,7 +6078,7 @@ function NeverLose:CreateWindow(Config)
 						ConfigSignal:SetValue(false);
 					end;
 				end;
-			end)
+			end))
 		end);
 
 		return ConfigLib;
@@ -6107,7 +6107,7 @@ function NeverLose:CreateWindow(Config)
 					UserSettings.Signal:SetValue(false);
 				end
 			end
-		end);
+		end));
 	end)
 
 	Window.UserSettings = UserSettings;
