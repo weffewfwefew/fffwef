@@ -1942,6 +1942,12 @@ function NeverLose:RegisiterHandler(Handler: Frame , Signal)
 		end;
 
 		function ColorPickerLib:SetValue(v)
+			-- configs store colors as hex strings; normalise back to Color3 so the
+			-- backend picker (Color:ToHSV) and GetValue() keep working.
+			if typeof(v) == 'string' then
+				v = Color3.fromHex((v:gsub('#' , '')));
+			end;
+
 			Config.Default = v;
 			BackendM:SetValue(Config.Default)
 		end;
@@ -2093,6 +2099,15 @@ function NeverLose:RegisiterHandler(Handler: Frame , Signal)
 		end;
 
 		function KeybindLib:SetValue(v)
+			-- guard nil (empty keybind in a config) before KeyCodeToStr indexes v.Name
+			if v == nil then
+				Config.Default = nil;
+				ValueLabel.Text = NeverLose:KeyCodeToStr("None");
+				KeybindLib:Update();
+				Config.Callback(Config.Default);
+				return;
+			end;
+
 			Config.Default = v;
 			ValueLabel.Text = NeverLose:KeyCodeToStr(v);
 			KeybindLib:Update();
@@ -2110,7 +2125,7 @@ function NeverLose:RegisiterHandler(Handler: Frame , Signal)
 		Config = NeverLose:ProcessParams(Config , {
 			Default = "",
 			Placeholder = "Placeholder",
-			Callback = print,
+			Callback = function() end,
 			Flag = nil,
 			Size = 100,
 			Numeric = false,
@@ -2492,7 +2507,8 @@ function NeverLose:RegisiterHandler(Handler: Frame , Signal)
 
 		DropdownLib.IsMatch = (function(v1)
 			if typeof(Config.Default) =='table' then
-				if Config.Default[v1] or table.find(Config.Default , v1) then
+				-- keys are normalised to strings; compare defensively against both.
+				if Config.Default[tostring(v1)] or Config.Default[v1] or table.find(Config.Default , v1) then
 					return true;
 				end
 			end
@@ -2648,7 +2664,8 @@ function NeverLose:RegisiterHandler(Handler: Frame , Signal)
 
 				if Config.Multi then
 					local _,bth_signal = NeverLose:CreateInput(ItemFrame , (function()
-						Config.Default[Value] = not Config.Default[Value];
+						local dkey = tostring(Value);
+						Config.Default[dkey] = not Config.Default[dkey];
 
 						MarkItem();
 
@@ -2683,7 +2700,27 @@ function NeverLose:RegisiterHandler(Handler: Frame , Signal)
 		end;
 
 		function DropdownLib:SetValue(v)
-			Config.Default = v;
+			-- multi selections may arrive as a serialized array of string keys (new
+			-- configs) or a legacy {[key]=true} dict; rebuild a string-keyed set either way.
+			if Config.Multi and typeof(v) == 'table' then
+				local dict = {};
+
+				if #v > 0 then
+					for _,key in next , v do
+						dict[tostring(key)] = true;
+					end;
+				else
+					for key,state in next , v do
+						if state then
+							dict[tostring(key)] = true;
+						end;
+					end;
+				end;
+
+				Config.Default = dict;
+			else
+				Config.Default = v;
+			end;
 
 			BasedLabel.Text = NeverLose.ParseDropdown(Config.Default);
 
@@ -2718,9 +2755,9 @@ NeverLose.ProcessDropdown = (function(value)
 
 		for i,v in next , value do
 			if typeof(v) == 'boolean' and typeof(i) ~= 'number' then
-				data[i] = v;
+				data[tostring(i)] = v;
 			else
-				data[v] = true;
+				data[tostring(v)] = true;
 			end;
 		end;
 
@@ -4177,11 +4214,14 @@ function NeverLose:CreateWindow(Config)
 
 		local SurfaceGui = Instance.new("SurfaceGui")
 
-		SurfaceGui.Parent = NeverLose.ScreenGui;
+		-- A SurfaceGui must be a sibling LayerCollector of the ScreenGui (same hidden
+		-- container), never nested inside a ScreenGui, or it fails to render/receive input.
+		SurfaceGui.Parent = CoreGui;
 		SurfaceGui.Adornee = Part;
-		SurfaceGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
-		SurfaceGui.AlwaysOnTop = true
-		SurfaceGui.LightInfluence = 1.000
+		-- AlwaysOnTop SurfaceGuis do not process GUI input in Roblox; keep it false so the
+		-- menu buttons stay clickable on the surface.
+		SurfaceGui.AlwaysOnTop = false;
+		SurfaceGui.LightInfluence = 1.000;
 		SurfaceGui.ZIndexBehavior = Enum.ZIndexBehavior.Global;
 		SurfaceGui.SizingMode = Enum.SurfaceGuiSizingMode.FixedSize;
 		SurfaceGui.PixelsPerStud = 40;
@@ -4220,18 +4260,48 @@ function NeverLose:CreateWindow(Config)
 		end);
 
 		function Window:Set3DRender(val)
+			val = val and true or false;
+
+			-- Idempotent: a redundant toggle must not disturb the current state.
+			if Window.__3DRender == val then
+				return;
+			end;
+
 			Window.__3DRender = val;
 			NeverLose.Global3DRenderMode = val;
 
 			if val then
+				Part.Parent = NeverLose.BlurModuleParent or workspace;
 				Window.Load3DBlock();
-			else
 
+				renderParentWindow();
+			else
+				-- renderParentWindow reparents WindowFrame back to the ScreenGui;
+				-- then fully restore the 2D layout so switching back is reversible.
+				renderParentWindow();
+
+				WindowFrame.Position = UDim2.fromScale(0.5, 0.5);
+				WindowFrame.Size = Window.Size;
 
 				Part.Parent = nil;
 			end;
+		end;
+	end;
 
-			renderParentWindow();
+	-- Fallback so Window:Set3DRender is ALWAYS defined, even when Enable3DRenderer was
+	-- false (no Part/SurfaceGui built). Without this the UserSettings "3D Menu" toggle
+	-- (window:Set3DRender(v)) crashes a default window with "attempt to call a nil value".
+	-- Safe, reversible no-op: it keeps the 3D flags off and informs the user via the UI.
+	if not Window.Set3DRender then
+		function Window:Set3DRender(val)
+			val = val and true or false;
+
+			Window.__3DRender = false;
+			NeverLose.Global3DRenderMode = false;
+
+			if val then
+				Logging.new("cube" , "3D renderer is disabled for this window" , 4);
+			end;
 		end;
 	end;
 
@@ -4934,6 +5004,8 @@ function NeverLose:CreateWindow(Config)
 		ConfigLib.UnsafeThread = nil;
 		ConfigLib.SelectedConfig = "Default";
 
+		local AUTOSAVE_INTERVAL = 5.75;
+
 		local UpdateSize = (function()
 			local size = TextService:GetTextSize(ConfigName.Text , ConfigName.TextSize,ConfigName.Font,Vector2.new(math.huge,math.huge));
 
@@ -4952,10 +5024,27 @@ function NeverLose:CreateWindow(Config)
 				if v and v.GetValue then
 					local data = v:GetValue();
 
-					if typeof(data) == 'Color3' then
+					if data == nil then
+						-- skip nil so loading never feeds SetValue(nil) (NaN / "nil" / reset)
+					elseif typeof(data) == 'Color3' then
 						table.insert(ikc,{
 							Idx = Flag,
 							Value = data:ToHex(),
+						});
+					elseif typeof(data) == 'table' then
+						-- multi-dropdown: store the selection as an array of string keys so
+						-- JSON round-trips regardless of numeric/string key coercion.
+						local selected = {};
+
+						for key,state in next , data do
+							if state == true then
+								table.insert(selected , tostring(key));
+							end;
+						end;
+
+						table.insert(ikc,{
+							Idx = Flag,
+							Value = selected,
 						});
 					else
 						table.insert(ikc,{
@@ -4977,8 +5066,51 @@ function NeverLose:CreateWindow(Config)
 			return NeverLose.Base64Encode(Encryption.new(HttpService:JSONEncode(ikc)));
 		end;
 
-		function ConfigLib:LoadData(data)
+		function ConfigLib:CaptureDefaults()
+			-- Elements overwrite Config.Default with their live value, so no pristine
+			-- default survives. Snapshot the state once (before the first load) and treat
+			-- that as "defaults" for reset-on-load below.
+			if ConfigLib.__DefaultState then
+				return;
+			end;
+
+			local snap = {};
+
+			for Flag,v in next , NeverLose.Flags do
+				if v and v.GetValue then
+					local ok, val = pcall(v.GetValue , v);
+
+					if ok then
+						snap[Flag] = val;
+					end;
+				end;
+			end;
+
+			ConfigLib.__DefaultState = snap;
+		end;
+
+		function ConfigLib:LoadData(data , resetFirst)
 			local coded = HttpService:JSONDecode(Encryption.reverse(NeverLose.Base64Decode(data)));
+
+			if resetFirst and ConfigLib.__DefaultState then
+				local present = {};
+
+				for i,v in next , coded do
+					if v.Idx then
+						present[v.Idx] = true;
+					end;
+				end;
+
+				-- flags absent from the file return to their captured default so state
+				-- from a previously loaded config does not bleed into this one.
+				for Flag,defVal in next , ConfigLib.__DefaultState do
+					if defVal ~= nil and not present[Flag] and NeverLose.Flags[Flag] then
+						task.spawn(function()
+							NeverLose.Flags[Flag]:SetValue(defVal);
+						end);
+					end;
+				end;
+			end;
 
 			for i,v in next , coded do
 				if v.Idx then
@@ -5015,7 +5147,9 @@ function NeverLose:CreateWindow(Config)
 			local ConfigList = {};
 			for i,v in next , listfiles(Window.ConfigFolder) do
 
-				local name = string.sub(v , #Window.ConfigFolder + 2);
+				-- listfiles output format varies by executor; take the final path segment
+				-- rather than slicing by folder length.
+				local name = string.match(v , '[^/\\]+$') or v;
 
 				table.insert(ConfigList , name)
 			end;
@@ -5211,6 +5345,12 @@ function NeverLose:CreateWindow(Config)
 					
 					delfile(Window.ConfigFolder..'/'..ConfigNameStr);
 
+					-- if the deleted config was active, fall back to Default so a later Save works
+					if ConfigLib.SelectedConfig == ConfigNameStr then
+						ConfigLib.SelectedConfig = "Default";
+						ConfigName.Text = "Default";
+					end;
+
 					UpdateSize();
 
 					ConfigLib:RefreshConfig();
@@ -5223,9 +5363,16 @@ function NeverLose:CreateWindow(Config)
 					local path = Window.ConfigFolder..'/'..ConfigNameStr;
 
 					if isfile(path) then
-						local data = readfile(path);
+						ConfigLib:CaptureDefaults();
 
-						ConfigLib:LoadData(data);
+						local ok = pcall(function()
+							ConfigLib:LoadData(readfile(path) , true);
+						end);
+
+						if not ok then
+							Logging.new("trash-can",'Failed to load '..tostring(ConfigNameStr),4);
+							return;
+						end;
 
 						ConfigLib.SelectedConfig = ConfigNameStr;
 						ConfigName.Text = ConfigNameStr;
@@ -5277,30 +5424,61 @@ function NeverLose:CreateWindow(Config)
 			if ConfigLib.SelectedConfig == "Default" then
 				local path = Window.ConfigFolder..'/Default';
 				local ConfigNameStr = "Default";
-				
+
+				ConfigLib:CaptureDefaults();
+
 				if isfile(path) then
-					local data = readfile(path);
+					local ok = pcall(function()
+						ConfigLib:LoadData(readfile(path) , true);
+					end);
 
-					ConfigLib:LoadData(data);
+					if ok then
+						ConfigLib.SelectedConfig = ConfigNameStr;
+						ConfigName.Text = ConfigNameStr;
 
-					ConfigLib.SelectedConfig = ConfigNameStr;
-					ConfigName.Text = ConfigNameStr;
+						UpdateSize();
+						ConfigLib:RefreshConfig();
 
-					UpdateSize();
+						Logging.new("folder","Loaded Default Config",3.5);
+					else
+						-- corrupt/undecodable Default: rebuild from the current state
+						Logging.new("trash-can","Default config was corrupt, recreated",4);
 
-					ConfigLib:RefreshConfig();
+						pcall(function()
+							writefile(path , ConfigLib:GetData());
+						end);
 
-					Logging.new("folder","Loaded Default Config",3.5);
-					
-					NeverLose:CancelThread(ConfigLib.__AutoSaveThread);
-					ConfigLib.__AutoSaveThread = NeverLose:AddThread(function()
-						while true do task.wait(5.75);
-							if isfile(path) and ConfigLib.SelectedConfig == "Default" then
-								writefile(Window.ConfigFolder..'/Default',ConfigLib:GetData(true));
-							end;
-						end;
+						ConfigLib:RefreshConfig();
+					end;
+				else
+					-- guarantee a Default file exists
+					pcall(function()
+						writefile(path , ConfigLib:GetData());
 					end);
 				end;
+
+				-- Autosave ALWAYS starts (even after a failed load), targets the currently
+				-- selected config, and only writes when the serialized data changed.
+				ConfigLib.__LastSaved = nil;
+
+				NeverLose:CancelThread(ConfigLib.__AutoSaveThread);
+				ConfigLib.__AutoSaveThread = NeverLose:AddThread(function()
+					while true do
+						task.wait(AUTOSAVE_INTERVAL);
+
+						local current = ConfigLib.SelectedConfig or "Default";
+						local savePath = Window.ConfigFolder..'/'..current;
+
+						if isfile(savePath) then
+							local snapshot = ConfigLib:GetData(true);
+
+							if snapshot ~= ConfigLib.__LastSaved then
+								writefile(savePath , snapshot);
+								ConfigLib.__LastSaved = snapshot;
+							end;
+						end;
+					end;
+				end);
 			end;
 		end);
 
@@ -5328,23 +5506,45 @@ function NeverLose:CreateWindow(Config)
 
 
 		local mv = NeverLose:CreateInput(LoadConfig , function()
-			local cfg_name = TextBox.Text;
+			local cfg_name = TextBox.Text or "";
 
-			if cfg_name and cfg_name:byte() and not cfg_name:find('/',1,true) and not cfg_name:find('\\',1,true) then
-				cfg_name = string.sub(cfg_name , 1 , 24);
+			-- trim surrounding whitespace
+			cfg_name = cfg_name:gsub('^%s+' , ''):gsub('%s+$' , '');
 
-				writefile(Window.ConfigFolder..'/'..cfg_name,ConfigLib:GetData());
-				ConfigLib.SelectedConfig = cfg_name;
-				ConfigName.Text = cfg_name;
+			-- whitelist letters/digits/space/dash/underscore; this also strips multi-byte
+			-- UTF-8 characters, which makes the byte-based length cut below safe.
+			cfg_name = cfg_name:gsub('[^%w _-]' , '');
 
-				Logging.new("folder",'Created '..tostring(cfg_name),3.5)
-
-				TextBox.Text = "";
-
-				UpdateSize();
-
-				ConfigLib:RefreshConfig();
+			if cfg_name == "" then
+				Logging.new("folder","Enter a valid config name",3.5);
+				return;
 			end;
+
+			if cfg_name == "Default" then
+				Logging.new("folder","'Default' is reserved",3.5);
+				return;
+			end;
+
+			cfg_name = string.sub(cfg_name , 1 , 24);
+
+			local path = Window.ConfigFolder..'/'..cfg_name;
+
+			if isfile(path) then
+				Logging.new("folder","Config already exists: "..cfg_name,3.5);
+				return;
+			end;
+
+			writefile(path , ConfigLib:GetData());
+			ConfigLib.SelectedConfig = cfg_name;
+			ConfigName.Text = cfg_name;
+
+			Logging.new("folder",'Created '..cfg_name,3.5)
+
+			TextBox.Text = "";
+
+			UpdateSize();
+
+			ConfigLib:RefreshConfig();
 		end);
 
 		NeverLose:AddSignal(mv.MouseEnter:Connect(function()
