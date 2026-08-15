@@ -1617,6 +1617,10 @@ function NeverLose:RegisiterHandler(Handler: Frame , Signal)
 		if Config.Flag then
 			NeverLose.Flags[Config.Flag] = ToggleLib;
 		end;
+		NeverLose:BindToolTip(ToggleLib, handle, Toggle, Config.Name);
+		if Config.ToolTip then
+			ToggleLib:ToolTip(Config.ToolTip);
+		end;
 		return ToggleLib;
 	end;
 	function handle:AddSlider(Config)
@@ -1883,6 +1887,10 @@ function NeverLose:RegisiterHandler(Handler: Frame , Signal)
 		if Config.Flag then
 			NeverLose.Flags[Config.Flag] = SliderLib;
 		end;
+		NeverLose:BindToolTip(SliderLib, handle, Slider, Config.Name);
+		if Config.ToolTip then
+			SliderLib:ToolTip(Config.ToolTip);
+		end;
 		return SliderLib;
 	end;
 	function handle:AddOption(GearIcon)
@@ -2070,6 +2078,10 @@ function NeverLose:RegisiterHandler(Handler: Frame , Signal)
 		if Config.Flag then
 			NeverLose.Flags[Config.Flag] = ColorPickerLib;
 		end;
+		NeverLose:BindToolTip(ColorPickerLib, handle, ColorPicker, Config.Name);
+		if Config.ToolTip then
+			ColorPickerLib:ToolTip(Config.ToolTip);
+		end;
 		return ColorPickerLib;
 	end;
 	function handle:AddKeybind(Config)
@@ -2189,6 +2201,10 @@ function NeverLose:RegisiterHandler(Handler: Frame , Signal)
 		if Config.Flag then
 			NeverLose.Flags[Config.Flag] = KeybindLib;
 		end;
+		NeverLose:BindToolTip(KeybindLib, handle, Keybind, Config.Name);
+		if Config.ToolTip then
+			KeybindLib:ToolTip(Config.ToolTip);
+		end;
 		return KeybindLib;
 	end;
 	function handle:AddTextInput(Config)
@@ -2281,6 +2297,10 @@ function NeverLose:RegisiterHandler(Handler: Frame , Signal)
 		end;
 		if Config.Flag then
 			NeverLose.Flags[Config.Flag] = TextBoxLib;
+		end;
+		NeverLose:BindToolTip(TextBoxLib, handle, TextInput, Config.Name);
+		if Config.ToolTip then
+			TextBoxLib:ToolTip(Config.ToolTip);
 		end;
 		return TextBoxLib;
 	end;
@@ -2689,6 +2709,10 @@ function NeverLose:RegisiterHandler(Handler: Frame , Signal)
 		if Config.Flag then
 			NeverLose.Flags[Config.Flag] = DropdownLib;
 		end;
+		NeverLose:BindToolTip(DropdownLib, handle, Dropdown, Config.Name);
+		if Config.ToolTip then
+			DropdownLib:ToolTip(Config.ToolTip);
+		end;
 		return DropdownLib;
 	end;
 	return handle;
@@ -2869,6 +2893,28 @@ function NeverLose:CreateToolTips(Container: Frame , Name: string , Content: str
 		ToolTip.Update();
 	end)))
 	return ToolTip;
+end;
+function NeverLose:BindToolTip(item, handleObj, rootFrame, defaultTitle)
+	function item:ToolTip(Content: string)
+		if handleObj and handleObj.ToolTip then
+			return handleObj:ToolTip(Content);
+		elseif rootFrame then
+			item.ToolTipObj = NeverLose:CreateToolTips(rootFrame, defaultTitle or "ToolTip", Content);
+			return item;
+		end;
+		return item;
+	end;
+	function item:AddToolTip(Name, Content)
+		local title = Content and Name or defaultTitle or "ToolTip";
+		local text = Content or Name;
+		if handleObj and handleObj.ToolTip then
+			return handleObj:ToolTip(text);
+		elseif rootFrame then
+			item.ToolTipObj = NeverLose:CreateToolTips(rootFrame, title, text);
+			return item;
+		end;
+		return item;
+	end;
 end;
 function NeverLose:RegisiterItem(Frame: Frame , Signel)
 	local idx = {};
