@@ -186,6 +186,10 @@ local SlowyTween = TweenInfo.new(0.175);
 local VSlowTween = TweenInfo.new(0.5,Enum.EasingStyle.Quint);
 local Encryption = {};
 
+local HasBuffer = (typeof(buffer) == 'table' and typeof(buffer.fromstring) == 'function' and typeof(buffer.readu8) == 'function' and typeof(buffer.writeu8) == 'function' and typeof(buffer.create) == 'function' and typeof(buffer.tostring) == 'function');
+local SafeFreeze = (table.freeze and function(t) return table.freeze(t); end) or function(t) return t; end;
+local TableCreate = (table.create and function(n) return table.create(n); end) or function() return {}; end;
+
 do
 	local __thumb_ok , __thumb = pcall(function()
 		return Players:GetUserThumbnailAsync(LocalPlayer.UserId , Enum.ThumbnailType.HeadShot , Enum.ThumbnailSize.Size150x150);
@@ -212,6 +216,8 @@ NeverLose.Scales = {
 	Default = UDim2.fromOffset(640 , 480),
 	Large = UDim2.fromOffset(800 , 600)
 };
+
+SafeFreeze(NeverLose.Scales);
 
 NeverLose.IconColor = Color3.fromRGB(255, 255, 255);
 NeverLose.ScreenGui = GlobalWindow;
@@ -275,18 +281,23 @@ function NeverLose:AddQuery(ItemRoot: Frame , Name : string)
 end;
 
 function Encryption.new(data: string)
-	local bytes = {};
 	local encrypt_seed = ((#data + 3782) % 111) + 1;
+	local size = #data;
+	local bytes = TableCreate(size);
 
-	string.gsub(data , '.', LPH_NO_VIRTUALIZE(function(dt)
-		table.insert(bytes , tostring(dt:byte() + encrypt_seed));
-	end));
+	if HasBuffer then
+		local buf = buffer.fromstring(data);
 
-	local concatbyte = table.concat(bytes,'?');
+		for i = 0 , size - 1 do
+			bytes[i + 1] = tostring(buffer.readu8(buf , i) + encrypt_seed);
+		end;
+	else
+		for i = 1 , size do
+			bytes[i] = tostring(string.byte(data , i) + encrypt_seed);
+		end;
+	end;
 
-	table.clear(bytes);
-
-	return "{"..tostring(encrypt_seed + 72667).."}?"..concatbyte;
+	return "{"..tostring(encrypt_seed + 72667).."}?"..table.concat(bytes,'?');
 end;
 
 function Encryption.reverse(data: string)
@@ -294,27 +305,127 @@ function Encryption.reverse(data: string)
 	local seed_str = main_data[1]:gsub('{',''):gsub('}','');
 	local seed = tonumber(seed_str);
 
-	local ks = {};
-	local real_seed = seed - 72667;
-
-	for i,v in next , main_data do
-		if i > 1 then
-			local fake_byte = tonumber(v);
-			table.insert(ks , string.char(fake_byte - real_seed))	
-		end;
+	if not seed then
+		return '';
 	end;
 
-	local data = table.concat(ks);
+	local real_seed = seed - 72667;
+	local count = #main_data - 1;
 
-	table.clear(ks);
+	if count < 1 then
+		return '';
+	end;
 
-	return data;
+	if HasBuffer then
+		local out = buffer.create(count);
+
+		for i = 1 , count do
+			local fake_byte = tonumber(main_data[i + 1]) or 0;
+
+			buffer.writeu8(out , i - 1 , (fake_byte - real_seed) % 256);
+		end;
+
+		return buffer.tostring(out);
+	end;
+
+	local ks = TableCreate(count);
+
+	for i = 1 , count do
+		local fake_byte = tonumber(main_data[i + 1]) or 0;
+
+		ks[i] = string.char((fake_byte - real_seed) % 256);
+	end;
+
+	return table.concat(ks);
 end;
 
 do
 	local b='ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
 
-	NeverLose.Base64Encode = LPH_NO_VIRTUALIZE(function(data)
+	if HasBuffer then
+		local bindex = TableCreate(64);
+		local rindex = {};
+
+		for i = 1 , 64 do
+			local ch = string.sub(b , i , i);
+
+			bindex[i - 1] = ch;
+			rindex[string.byte(ch)] = i - 1;
+		end;
+
+		local band = bit32.band;
+		local rshift = bit32.rshift;
+
+		NeverLose.Base64Encode = LPH_NO_VIRTUALIZE(function(data)
+			local n = #data;
+			local buf = buffer.fromstring(data);
+			local out = TableCreate(math.ceil(n / 3) * 4);
+			local i = 0;
+
+			while i + 2 < n do
+				local n32 = buffer.readu8(buf , i) * 65536 + buffer.readu8(buf , i + 1) * 256 + buffer.readu8(buf , i + 2);
+
+				out[#out + 1] = bindex[band(rshift(n32 , 18) , 63)];
+				out[#out + 1] = bindex[band(rshift(n32 , 12) , 63)];
+				out[#out + 1] = bindex[band(rshift(n32 , 6) , 63)];
+				out[#out + 1] = bindex[band(n32 , 63)];
+
+				i += 3;
+			end;
+
+			local rem = n - i;
+
+			if rem == 1 then
+				local n32 = buffer.readu8(buf , i) * 65536;
+
+				out[#out + 1] = bindex[band(rshift(n32 , 18) , 63)];
+				out[#out + 1] = bindex[band(rshift(n32 , 12) , 63)];
+				out[#out + 1] = '=';
+				out[#out + 1] = '=';
+			elseif rem == 2 then
+				local n32 = buffer.readu8(buf , i) * 65536 + buffer.readu8(buf , i + 1) * 256;
+
+				out[#out + 1] = bindex[band(rshift(n32 , 18) , 63)];
+				out[#out + 1] = bindex[band(rshift(n32 , 12) , 63)];
+				out[#out + 1] = bindex[band(rshift(n32 , 6) , 63)];
+				out[#out + 1] = '=';
+			end;
+
+			return table.concat(out);
+		end);
+
+		NeverLose.Base64Decode = LPH_NO_VIRTUALIZE(function(data)
+			data = string.gsub(data , '[^'..b..'=]' , '');
+
+			local n = #data;
+			local out = buffer.create(math.ceil(n * 3 / 4));
+			local oi = 0;
+			local i = 1;
+
+			while i + 3 <= n do
+				local a1 , b1 , c1 , d1 = string.byte(data , i , i + 3);
+				local n32 = (rindex[a1] or 0) * 262144 + (rindex[b1] or 0) * 4096 + (rindex[c1] or 0) * 64 + (rindex[d1] or 0);
+
+				buffer.writeu8(out , oi , band(rshift(n32 , 16) , 255));
+				oi += 1;
+
+				if c1 ~= 61 then
+					buffer.writeu8(out , oi , band(rshift(n32 , 8) , 255));
+					oi += 1;
+				end;
+
+				if d1 ~= 61 then
+					buffer.writeu8(out , oi , band(n32 , 255));
+					oi += 1;
+				end;
+
+				i += 4;
+			end;
+
+			return string.sub(buffer.tostring(out) , 1 , oi);
+		end);
+	else
+		NeverLose.Base64Encode = LPH_NO_VIRTUALIZE(function(data)
 		return ((data:gsub('.', function(x) 
 			local r,b='',x:byte()
 			for i=8,1,-1 do r=r..(b%2^i-b%2^(i-1)>0 and '1' or '0') end
@@ -327,7 +438,7 @@ do
 		end)..({ '', '==', '=' })[#data%3+1])
 	end);
 
-	NeverLose.Base64Decode = LPH_NO_VIRTUALIZE(function(data)
+		NeverLose.Base64Decode = LPH_NO_VIRTUALIZE(function(data)
 		data = string.gsub(data, '[^'..b..'=]', '')
 		return (data:gsub('.', function(x)
 			if (x == '=') then return '' end
@@ -341,6 +452,7 @@ do
 			return string.char(c)
 		end))
 	end);
+	end;
 end;
 
 NeverLose.LoadIcon = LPH_NO_VIRTUALIZE(function()
@@ -837,6 +949,8 @@ NeverLose.LoadIcon = LPH_NO_VIRTUALIZE(function()
 		["xr-headset"] = "xr-headset",
 		["youtube"] = "youtube"
 	};
+
+	SafeFreeze(NeverLose.RobloxIcon);
 end);
 
 NeverLose.LoadIcon();
@@ -1732,6 +1846,9 @@ NeverLose.EnumReverse = {};
 for i,v in next , NeverLose.KeyEnum do
 	NeverLose.EnumReverse[v] = i;
 end;
+
+SafeFreeze(NeverLose.KeyEnum);
+SafeFreeze(NeverLose.EnumReverse);
 
 function NeverLose:KeyCodeToStr(K: Enum.KeyCode)
 	if typeof(K) == 'string' then
@@ -4638,88 +4755,91 @@ function NeverLose:CreateWindow(Config)
 		end)));
 	end;
 
-	if Window.Enable3DRenderer then
-		local Part = Instance.new('Part');
+	do
+		local Part;
+		local initialized3D = false;
 
-		Part.Name = NeverLose.RandomString();
-		Part.Anchored = true;
-		Part.Transparency = 1;
-		Part.CanCollide = false;
-		Part.CanTouch = false;
-		Part.AudioCanCollide = false;
-		Part.CollisionGroup = NeverLose.RandomString();
-		Part.CFrame = CFrame.new(0,0,0);
-		Part.Size = Vector3.zero;
-
-		local SurfaceGui = Instance.new("SurfaceGui")
-
-		SurfaceGui.Parent = NeverLose.ScreenGui;
-		SurfaceGui.Adornee = Part;
-		SurfaceGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
-		SurfaceGui.AlwaysOnTop = true
-		SurfaceGui.LightInfluence = 1.000
-		SurfaceGui.ZIndexBehavior = Enum.ZIndexBehavior.Global;
-		SurfaceGui.SizingMode = Enum.SurfaceGuiSizingMode.FixedSize;
-		SurfaceGui.PixelsPerStud = 40;
-
-		Window.SurfaceGui = SurfaceGui;
-		NeverLose.GlobalSurfaceGui = SurfaceGui;
-
-		local PerfectScale = Vector2.new(1920 , 1080 + 300)
-
-		Window.Load3DBlock = LPH_NO_VIRTUALIZE(function()
-			if not Window.Signal:GetValue() then
-				local _,OnScreen = CurrentCamera:WorldToViewportPoint(Part.Position);
-
-				if OnScreen then
-					NeverLose.PlayAnimate(Part,VSlowTween , {
-						CFrame = CurrentCamera.CFrame * CFrame.new(0,0,-15) * CFrame.Angles(0,math.rad(180),0);
-					});
-				end;
-
-				return
+		local function Init3DRenderer()
+			if initialized3D then
+				return;
 			end;
 
-			local Dimensions = 50;
+			initialized3D = true;
 
-			local XY_Incom = Vector2.new(PerfectScale.X + 5, PerfectScale.Y * 1.35) / (Dimensions / 2);
-			local PerfectDistance = XY_Incom.Magnitude;
-			local SizeIndicator = PerfectDistance / 1.35;
+			Part = Instance.new('Part');
 
-			Part.Parent = NeverLose.BlurModuleParent or workspace;
+			Part.Name = NeverLose.RandomString();
+			Part.Anchored = true;
+			Part.Transparency = 1;
+			Part.CanCollide = false;
+			Part.CanTouch = false;
+			Part.AudioCanCollide = false;
+			Part.CollisionGroup = NeverLose.RandomString();
+			Part.CFrame = CFrame.new(0,0,0);
+			Part.Size = Vector3.zero;
 
-			NeverLose.PlayAnimate(Part,VSlowTween , {
-				CFrame = (CurrentCamera.CFrame * CFrame.new(0,0,-25)) * CFrame.Angles(0,math.rad(180),0);
-			});
+			local SurfaceGui = Instance.new("SurfaceGui")
 
-			Part.Size = Vector3.new(PerfectScale.X / SizeIndicator,PerfectScale.Y / SizeIndicator,0);
-		end);
+			SurfaceGui.Parent = NeverLose.ScreenGui;
+			SurfaceGui.Adornee = Part;
+			SurfaceGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+			SurfaceGui.AlwaysOnTop = true
+			SurfaceGui.LightInfluence = 1.000
+			SurfaceGui.ZIndexBehavior = Enum.ZIndexBehavior.Global;
+			SurfaceGui.SizingMode = Enum.SurfaceGuiSizingMode.FixedSize;
+			SurfaceGui.PixelsPerStud = 40;
+
+			Window.SurfaceGui = SurfaceGui;
+			NeverLose.GlobalSurfaceGui = SurfaceGui;
+
+			local PerfectScale = Vector2.new(1920 , 1080 + 300)
+
+			Window.Load3DBlock = LPH_NO_VIRTUALIZE(function()
+				if not Window.Signal:GetValue() then
+					local _,OnScreen = CurrentCamera:WorldToViewportPoint(Part.Position);
+
+					if OnScreen then
+						NeverLose.PlayAnimate(Part,VSlowTween , {
+							CFrame = CurrentCamera.CFrame * CFrame.new(0,0,-15) * CFrame.Angles(0,math.rad(180),0);
+						});
+					end;
+
+					return
+				end;
+
+				local Dimensions = 50;
+
+				local XY_Incom = Vector2.new(PerfectScale.X + 5, PerfectScale.Y * 1.35) / (Dimensions / 2);
+				local PerfectDistance = XY_Incom.Magnitude;
+				local SizeIndicator = PerfectDistance / 1.35;
+
+				Part.Parent = NeverLose.BlurModuleParent or workspace;
+
+				NeverLose.PlayAnimate(Part,VSlowTween , {
+					CFrame = (CurrentCamera.CFrame * CFrame.new(0,0,-25)) * CFrame.Angles(0,math.rad(180),0);
+				});
+
+				Part.Size = Vector3.new(PerfectScale.X / SizeIndicator,PerfectScale.Y / SizeIndicator,0);
+			end);
+		end;
 
 		function Window:Set3DRender(val)
+			Init3DRenderer();
+
 			Window.__3DRender = val;
 			NeverLose.Global3DRenderMode = val;
 
 			if val then
 				Window.Load3DBlock();
 			else
-
-
 				Part.Parent = nil;
 			end;
 
 			renderParentWindow();
 		end;
-	end;
 
-	if not Window.Enable3DRenderer then
-		local warned3d = false;
-
-		function Window:Set3DRender(val)
-			if not warned3d then
-				warned3d = true;
-
-				warn('[NeverLose] Set3DRender ignored: window was created with Enable3DRenderer = false');
-			end;
+		if Window.Enable3DRenderer then
+			Init3DRenderer();
 		end;
 	end;
 
@@ -6545,6 +6665,8 @@ function NeverLose:CreateIndicator()
 		Green = Color3.fromRGB(135, 255, 143),
 		White = Color3.fromRGB(186, 186, 186),
 	};
+
+	SafeFreeze(Indicators.Color);
 
 	Indicators.Root = IndicatorFrame;
 
