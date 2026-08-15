@@ -1,4 +1,5 @@
 --[[
+    This is early release source
                           Neverlose.cc UI Library
     Author: 4lpaca
 	License: MIT
@@ -2445,7 +2446,6 @@ function NeverLose:RegisiterHandler(Handler: Frame , Signal)
 		ColorPicker.ClipsDescendants = true
 		ColorPicker.Size = UDim2.new(0, 18, 0, 18)
 		ColorPicker.ZIndex = ZINdex + 13
-		ColorPicker.LayoutOrder = -(#Handler:GetChildren() + 5);
 
 		UICorner.CornerRadius = UDim.new(0, 4)
 		UICorner.Parent = ColorPicker
@@ -2570,7 +2570,6 @@ function NeverLose:RegisiterHandler(Handler: Frame , Signal)
 		Keybind.ClipsDescendants = true
 		Keybind.Size = UDim2.new(0, 45, 0, 18)
 		Keybind.ZIndex = ZINdex + 13
-		Keybind.LayoutOrder = -(#Handler:GetChildren() + 5);
 
 		UICorner.CornerRadius = UDim.new(0, 4)
 		UICorner.Parent = Keybind
@@ -2725,7 +2724,6 @@ function NeverLose:RegisiterHandler(Handler: Frame , Signal)
 		TextInput.ClipsDescendants = true
 		TextInput.Size = UDim2.new(0, Config.Size, 0, 18)
 		TextInput.ZIndex = ZINdex + 13
-		TextInput.LayoutOrder = -(#Handler:GetChildren() + 5);
 
 		UICorner.CornerRadius = UDim.new(0, 4)
 		UICorner.Parent = TextInput
@@ -2840,7 +2838,6 @@ function NeverLose:RegisiterHandler(Handler: Frame , Signal)
 		Dropdown.ClipsDescendants = true
 		Dropdown.Size = UDim2.new(0, Config.Size, 0, 18)
 		Dropdown.ZIndex = ZINdex + 13
-		Dropdown.LayoutOrder = -(#Handler:GetChildren() + 5);
 
 		DropdownIcon.Name = NeverLose.RandomString();
 		DropdownIcon.Parent = Dropdown
@@ -4563,7 +4560,7 @@ function NeverLose:CreateWindow(Config)
 	ConfigIcon.Size = UDim2.new(0, 25, 0, 25)
 	ConfigIcon.ZIndex = 9
 	ConfigIcon.FontFace = NeverLose.BuiltInBold
-	ConfigIcon.Text = "floppy-disk"
+	ConfigIcon.Text = "pencil-square"
 	ConfigIcon.TextColor3 = Color3.fromRGB(223, 223, 223)
 	ConfigIcon.TextSize = 16.000
 	ConfigIcon.TextTransparency = 0.250
