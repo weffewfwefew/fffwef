@@ -2284,6 +2284,11 @@ function NeverLose:RegisiterHandler(Handler: Frame , Signal)
 		end;
 		return TextBoxLib;
 	end;
+	handle.AddTextBox = handle.AddTextInput;
+	handle.AddInput = handle.AddTextInput;
+	function handle:AddToolTip(Name, Content)
+		return handle:ToolTip(Content or Name);
+	end;
 	function handle:AddDropdown(Config)
 		Config = NeverLose:ProcessParams(Config , {
 			Default = nil,
@@ -3229,6 +3234,45 @@ function NeverLose:RegisiterItem(Frame: Frame , Signel)
 		end;
 		return UserFrameItem;
 	end;
+	function idx:AddToggle(Config)
+		local name = (typeof(Config) == "table" and Config.Name) or "Toggle";
+		local handle = idx:AddLabel(name, false);
+		if typeof(Config) == "table" and Config.ToolTip then
+			handle:ToolTip(Config.ToolTip);
+		end;
+		return handle:AddToggle(Config);
+	end;
+	function idx:AddSlider(Config)
+		local name = (typeof(Config) == "table" and Config.Name) or "Slider";
+		local handle = idx:AddLabel(name, false);
+		return handle:AddSlider(Config);
+	end;
+	function idx:AddDropdown(Config)
+		local name = (typeof(Config) == "table" and Config.Name) or "Dropdown";
+		local handle = idx:AddLabel(name, false);
+		return handle:AddDropdown(Config);
+	end;
+	function idx:AddColorPicker(Config)
+		local name = (typeof(Config) == "table" and Config.Name) or "Color Picker";
+		local handle = idx:AddLabel(name, false);
+		return handle:AddColorPicker(Config);
+	end;
+	function idx:AddKeybind(Config)
+		local name = (typeof(Config) == "table" and Config.Name) or "Keybind";
+		local handle = idx:AddLabel(name, false);
+		return handle:AddKeybind(Config);
+	end;
+	function idx:AddTextInput(Config)
+		local name = (typeof(Config) == "table" and Config.Name) or "Text Input";
+		local handle = idx:AddLabel(name, false);
+		return handle:AddTextInput(Config);
+	end;
+	idx.AddTextBox = idx.AddTextInput;
+	idx.AddInput = idx.AddTextInput;
+	function idx:AddOption(GearIcon)
+		local handle = idx:AddLabel("Option", false);
+		return handle:AddOption(GearIcon);
+	end;
 	return idx;
 end;
 NeverLose.RegisterItem = NeverLose.RegisiterItem;
@@ -3255,6 +3299,7 @@ function NeverLose:CreateWindow(Config)
 		Enable3DRenderer = Config.Enable3DRenderer
 	};
 	NeverLose.GlobalLogo = Window.Logo;
+	NeverLose.__MainWindow = Window;
 	local Logging = NeverLose:CreateLogger();
 	if not isfolder(Window.ConfigFolder) then
 		makefolder(Window.ConfigFolder);
@@ -5105,6 +5150,10 @@ function NeverLose:CreateWindow(Config)
 			end
 		end;
 		function Watermark_lb:AddBlock(IconStr , Name)
+			if not Name then
+				Name = IconStr;
+				IconStr = "crosshairs";
+			end;
 			local InnerBlock = {};
 			local Frame = Instance.new("Frame")
 			local Content = Instance.new("TextLabel")
@@ -5201,6 +5250,17 @@ function NeverLose:CreateWindow(Config)
 	Window:SetRender(false);
 	return Window;
 end;
+function NeverLose:CreateWatermark(Config)
+	if NeverLose.__WatermarkCache then
+		return NeverLose.__WatermarkCache;
+	end;
+	if NeverLose.__MainWindow then
+		return NeverLose.__MainWindow:Watermark(Config);
+	end;
+	local temp = { Watermark = NeverLose.CreateWindow };
+	return temp:Watermark(Config);
+end;
+NeverLose.Watermark = NeverLose.CreateWatermark;
 function NeverLose:CreateNotification()
 	if NeverLose.__Notification_Cache then
 		return NeverLose.__Notification_Cache;
@@ -5223,6 +5283,10 @@ function NeverLose:CreateNotification()
 	UIListLayout.Padding = UDim.new(0, 0)
 	NeverLose.__Notification_Cache = Notifier;
 	function Notifier.new(Config)
+		if typeof(Config) == "table" then
+			Config.Logo = Config.Logo or Config.Icon;
+			Config.Duration = Config.Duration or Config.Time;
+		end;
 		Config = NeverLose:ProcessParams(Config , {
 			Title = "Notification",
 			Content = "Hello World!",
@@ -5349,6 +5413,9 @@ function NeverLose:CreateNotification()
 		end))
 	end;
 	return Notifier;
+end;
+function NeverLose:Notification(Config)
+	return NeverLose:CreateNotification().new(Config);
 end;
 function NeverLose:CreateLogger()
 	if NeverLose.__LogSystem then
