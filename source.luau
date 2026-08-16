@@ -4315,17 +4315,17 @@ function NeverLose:CreateWindow(Config)
 	HeadFrame.BackgroundTransparency = 1.000
 	HeadFrame.BorderColor3 = Color3.fromRGB(0, 0, 0)
 	HeadFrame.BorderSizePixel = 0
-	HeadFrame.Size = UDim2.new(1, 0, 0, 50)
+	HeadFrame.Size = UDim2.new(1, 0, 0, 75)
 	HeadFrame.ZIndex = 7
 
 	LogoImage.Name = NeverLose.RandomString();
 	LogoImage.Parent = HeadFrame
-	LogoImage.AnchorPoint = Vector2.new(0, 0.5)
+	LogoImage.AnchorPoint = Vector2.new(0.5, 0)
 	LogoImage.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
 	LogoImage.BackgroundTransparency = 1.000
 	LogoImage.BorderColor3 = Color3.fromRGB(0, 0, 0)
 	LogoImage.BorderSizePixel = 0
-	LogoImage.Position = UDim2.new(0, 10, 0.5, 0)
+	LogoImage.Position = UDim2.new(0.5, 0, 0, 5)
 	LogoImage.Size = UDim2.new(0, Config.LogoWidth or 35, 0, 35)
 	LogoImage.ZIndex = 7
 	LogoImage.ScaleType = Enum.ScaleType.Fit
@@ -4341,14 +4341,14 @@ function NeverLose:CreateWindow(Config)
 	WindowName.BackgroundTransparency = 1.000
 	WindowName.BorderColor3 = Color3.fromRGB(0, 0, 0)
 	WindowName.BorderSizePixel = 0
-	WindowName.Position = UDim2.new(0, 20 + (Config.LogoWidth or 35), 0, 4)
-	WindowName.Size = UDim2.new(0, 200, 0, 25)
+	WindowName.Position = UDim2.new(0, 0, 0, 41)
+	WindowName.Size = UDim2.new(1, 0, 0, 18)
 	WindowName.ZIndex = 7
 	WindowName.Font = Enum.Font.GothamBold
 	WindowName.Text = Window.Name
 	WindowName.TextColor3 = Color3.fromRGB(255, 255, 255)
 	WindowName.TextSize = 18.000
-	WindowName.TextXAlignment = Enum.TextXAlignment.Left
+	WindowName.TextXAlignment = Enum.TextXAlignment.Center
 
 	WindowContent.Name = NeverLose.RandomString();
 	WindowContent.Parent = HeadFrame
@@ -4356,15 +4356,15 @@ function NeverLose:CreateWindow(Config)
 	WindowContent.BackgroundTransparency = 1.000
 	WindowContent.BorderColor3 = Color3.fromRGB(0, 0, 0)
 	WindowContent.BorderSizePixel = 0
-	WindowContent.Position = UDim2.new(0, 20 + (Config.LogoWidth or 35), 0, 25)
-	WindowContent.Size = UDim2.new(0, 200, 0, 15)
+	WindowContent.Position = UDim2.new(0, 0, 0, 59)
+	WindowContent.Size = UDim2.new(1, 0, 0, 13)
 	WindowContent.ZIndex = 7
 	WindowContent.Font = Enum.Font.GothamBold
 	WindowContent.Text = Window.Content
 	WindowContent.TextColor3 = Color3.fromRGB(255, 255, 255)
 	WindowContent.TextSize = 9.000
 	WindowContent.TextTransparency = 0.650
-	WindowContent.TextXAlignment = Enum.TextXAlignment.Left
+	WindowContent.TextXAlignment = Enum.TextXAlignment.Center
 
 	LineFrame.Name = NeverLose.RandomString();
 	LineFrame.Parent = HeadFrame
@@ -4385,8 +4385,8 @@ function NeverLose:CreateWindow(Config)
 	LeftScrollingFrame.BackgroundTransparency = 1.000
 	LeftScrollingFrame.BorderColor3 = Color3.fromRGB(0, 0, 0)
 	LeftScrollingFrame.BorderSizePixel = 0
-	LeftScrollingFrame.Position = UDim2.new(0.5, 0, 0, 60)
-	LeftScrollingFrame.Size = UDim2.new(1, -10, 1, -115)
+	LeftScrollingFrame.Position = UDim2.new(0.5, 0, 0, 85)
+	LeftScrollingFrame.Size = UDim2.new(1, -10, 1, -140)
 	LeftScrollingFrame.ZIndex = 7
 	LeftScrollingFrame.ScrollBarThickness = 0
 
